@@ -189,13 +189,14 @@ async function loadThumb(r) {
     document.querySelectorAll(`img[data-thumb="${r.slug}"]`).forEach(i => i.src = thumbs[r.slug]);
   } catch {}
 }
+// The full video lives in a Release; its download server blocks browser pages (no CORS), so the player uses the small preview on the
+// 'media' branch (served by the API with CORS) and "Herunterladen" opens the Release file as a normal page (works when logged in to GitHub).
+const fullUrl = r => `https://github.com/${REPO}/releases/download/${r.video_tag}/${r.video_asset}`;
 async function videoUrl(r) {
-  const rel = await (await gh(`/repos/${REPO}/releases/tags/${r.video_tag}`)).json();
-  const a = (rel.assets || []).find(x => x.name === r.video_asset);
-  if (!a) throw new Error('Video nicht gefunden');
-  const res = await gh(`/repos/${REPO}/releases/assets/${a.id}`, { headers: { Accept: 'application/octet-stream' } });
-  if (!res.ok) throw new Error('Video-Download fehlgeschlagen');
-  return { url: URL.createObjectURL(await res.blob()), page: rel.html_url };
+  if (!r.preview) throw new Error('Für dieses Reel gibt es noch keine Vorschau');
+  const res = await gh(`/repos/${REPO}/contents/${r.preview}?ref=media`, { headers: { Accept: 'application/vnd.github.raw' } });
+  if (!res.ok) throw new Error(`Vorschau konnte nicht geladen werden (${res.status})`);
+  return URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: 'video/mp4' }));
 }
 
 // ── actions ──
@@ -231,15 +232,15 @@ async function copy(text, what) { try { await navigator.clipboard.writeText(text
 async function play(slug) {
   const r = state.reels.find(x => x.slug === slug);
   const m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:10px"><b style="flex:1">${esc(r.title)}</b><button class="btn small ghost" data-close>✕</button></div><div class="empty">Video lädt (${r.size_mb} MB) …</div></div>`;
+  const dl = `<div class="row" style="margin-top:10px"><a class="btn red small" href="${fullUrl(r)}" target="_blank" rel="noopener">↓ Volle Qualität (${r.size_mb} MB)</a><span class="muted">zum Posten · du musst im Browser bei GitHub eingeloggt sein</span></div>`;
+  m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:10px"><b style="flex:1">${esc(r.title)}</b><button class="btn small ghost" data-close>✕</button></div><div class="empty">Vorschau lädt …</div>${dl}</div>`;
   m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-close]')) { m.remove(); } });
   document.body.appendChild(m);
   try {
-    const v = await videoUrl(r);
-    m.querySelector('.empty').outerHTML = `<video src="${v.url}" controls autoplay playsinline></video>
-      <div class="row" style="margin-top:10px"><a class="btn red small" href="${v.url}" download="${esc(r.video_asset)}">↓ Herunterladen</a><span class="muted">zum Posten aufs Gerät speichern</span></div>`;
+    const url = await videoUrl(r);
+    m.querySelector('.empty').outerHTML = `<video src="${url}" controls autoplay playsinline></video><div class="muted" style="margin-top:6px">Vorschau in reduzierter Qualität</div>`;
   } catch (e) {
-    m.querySelector('.empty').innerHTML = `${esc(e.message)}<br><a href="https://github.com/${REPO}/releases/tag/${esc(r.video_tag)}" target="_blank" rel="noopener">Auf GitHub öffnen</a>`;
+    m.querySelector('.empty').innerHTML = esc(e.message);
   }
 }
 
