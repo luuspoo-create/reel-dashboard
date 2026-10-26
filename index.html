@@ -60,7 +60,7 @@
   .seg button.on[data-v=bereit] { background: var(--amber-soft); color: var(--amber); }
   .seg button.on[data-v=gepostet] { background: var(--ok); color: #fff; }
   .textbox { border: 1.5px solid var(--hair); border-radius: 12px; background: #FCFBF8; }
-  .textbox .tb-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 0 12px; }
+  .textbox .tb-head { flex-wrap: wrap; display: flex; align-items: center; gap: 8px; padding: 8px 10px 0 12px; }
   .textbox .tb-head .sp { flex: 1; }
   .textbox pre { margin: 0; padding: 6px 12px 12px; white-space: pre-wrap; word-wrap: break-word; font: 14px/1.5 'Space Grotesk', sans-serif; max-height: 132px; overflow: hidden; position: relative; }
   .textbox.open pre { max-height: none; }
@@ -201,10 +201,12 @@ async function videoUrl(r) {
 
 // ── actions ──
 async function setStatus(slug, status) {
+  if (state.reels.find(r => r.slug === slug)?.postiz?.post_id) return toast('Diesen Beitrag bitte in Postiz verwalten');
   const link = status === 'gepostet' ? (prompt('Link zum Instagram-Beitrag (optional, sonst ergänzt ihn der 06:00-Abruf automatisch):') || '').trim() : null;
   try {
     const data = await mutate('data/reels.json', { reels: [] }, d => {
       const r = d.reels.find(x => x.slug === slug); if (!r) return;
+      if (r.postiz?.post_id) throw new Error('Inzwischen in Postiz eingeplant – bitte aktualisieren');
       r.status = status;
       if (status === 'gepostet') { r.posted = r.posted || today(); if (link) r.ig_permalink = link; } else { r.posted = null; }
     }, `Reel ${slug}: ${status}`);
@@ -250,7 +252,7 @@ function postStats(r) {
   const p = state.stats.posts.find(x => x.id === r.ig_id); if (!p) return '';
   return `<div class="stats-row"><span><b>${fmtN(p.views)}</b> Views</span><span><b>${fmtN(p.likes)}</b> Likes</span><span><b>${fmtN(p.comments)}</b> Kommentare</span><span><b>${fmtN(p.saved)}</b> Gespeichert</span><span><b>${fmtN(p.shares)}</b> Geteilt</span></div>`;
 }
-const statusChip = s => s === 'gepostet' ? '<span class="chip ok">gepostet</span>' : s === 'bereit' ? '<span class="chip amber">bereit</span>' : '<span class="chip">Entwurf</span>';
+const statusChip = s => s === 'geplant' ? '<span class="chip amber">geplant</span>' : s === 'pruefen' ? '<span class="chip red">Planung prüfen</span>' : s === 'gepostet' ? '<span class="chip ok">gepostet</span>' : s === 'bereit' ? '<span class="chip amber">bereit</span>' : '<span class="chip">Entwurf</span>';
 function textBox(id, label, text, extra = '') {
   const open = state.open[id];
   return `<div class="textbox ${open ? 'open' : ''}" data-id="${id}"><div class="tb-head"><span class="mono">${label}</span>${extra}<span class="sp"></span>
@@ -262,7 +264,7 @@ function reelCard(r) {
     <div class="body">
       <div class="row"><span class="mono">${fmtDate(r.created)} · ${r.duration ?? ''} s</span>${statusChip(r.status)}</div>
       <h3>${esc(r.title)}</h3>
-      <div class="seg" data-slug="${r.slug}">${['entwurf', 'bereit', 'gepostet'].map(v => `<button data-v="${v}" class="${r.status === v ? 'on' : ''}">${v === 'entwurf' ? 'Entwurf' : v === 'bereit' ? 'Bereit' : 'Gepostet'}</button>`).join('')}</div>
+      ${r.postiz?.post_id ? `<div class="muted">${r.postiz.state === 'QUEUE' ? `Geplant für ${esc(new Date(r.postiz.scheduled_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich', dateStyle: 'medium', timeStyle: 'short' }))} Uhr (Schweizer Zeit)` : r.postiz.state === 'PUBLISHED' ? 'Über Postiz veröffentlicht' : 'Planung bitte in Postiz prüfen'} · Originalqualität</div><div><a class="btn small" href="https://postiz.spohnstack.io/" target="_blank" rel="noopener">In Postiz verwalten ↗</a></div>` : `<div class="seg" data-slug="${r.slug}">${['entwurf', 'bereit', 'gepostet'].map(v => `<button data-v="${v}" class="${r.status === v ? 'on' : ''}">${v === 'entwurf' ? 'Entwurf' : v === 'bereit' ? 'Bereit' : 'Gepostet'}</button>`).join('')}</div>`}
       ${r.posted ? `<div class="muted">gepostet am ${fmtDate(r.posted)}${r.ig_permalink ? ` · <a href="${esc(r.ig_permalink)}" target="_blank" rel="noopener">auf Instagram</a>` : ''}</div>` : ''}
       ${postStats(r)}
       ${textBox(`cap-${r.slug}`, 'Instagram-Text', r.caption)}
@@ -270,9 +272,13 @@ function reelCard(r) {
     </div></article>`;
 }
 function viewPosten() {
-  const list = state.reels.filter(r => r.status !== 'gepostet');
+  const list = state.reels.filter(r => !['gepostet', 'geplant'].includes(r.status));
   if (!list.length) return `<div class="card empty"><div class="big">Alles gepostet.</div>Neue Reels erscheinen hier, sobald sie fertig gerendert und hochgeladen sind.</div>`;
   return `<div class="grid">${list.map(reelCard).join('')}</div>`;
+}
+function viewGeplant() {
+  const list = state.reels.filter(r => r.status === 'geplant').sort((a,b) => (a.postiz?.scheduled_at || '').localeCompare(b.postiz?.scheduled_at || ''));
+  return `<div class="muted" style="margin-bottom:16px">Täglich ein Reel · Originalqualität · Termine in Schweizer Zeit. Terminänderungen und Absagen bitte in Postiz vornehmen; der Abgleich erfolgt alle 15 Minuten.</div>${list.length ? `<div class="grid">${list.map(reelCard).join('')}</div>` : '<div class="card empty"><div class="big">Noch keine Reels geplant.</div>Bestätigte Postiz-Termine erscheinen hier automatisch.</div>'}`;
 }
 function viewArchiv() {
   const q = state.search.toLowerCase();
@@ -356,11 +362,11 @@ function render() {
   if (!token()) { app.innerHTML = viewLogin(); $('#reload').style.display = 'none'; return; }
   $('#reload').style.display = '';
   if (!state.reels) { app.innerHTML = `<div class="empty">lädt …</div>`; return; }
-  const n = { posten: state.reels.filter(r => r.status !== 'gepostet').length, archiv: state.reels.filter(r => r.status === 'gepostet').length, ideen: state.ideas.filter(i => i.status === 'neu' || i.status === 'ausgewählt').length };
-  const tabs = [['posten', 'Zum Posten', n.posten], ['archiv', 'Archiv', n.archiv], ['ideen', 'Ideen', n.ideen], ['zahlen', 'Zahlen', null]];
+  const n = { posten: state.reels.filter(r => !['gepostet', 'geplant'].includes(r.status)).length, archiv: state.reels.filter(r => r.status === 'gepostet').length, ideen: state.ideas.filter(i => i.status === 'neu' || i.status === 'ausgewählt').length };
+  const tabs = [['posten', 'Zum Posten', n.posten], ['geplant', 'Geplant', state.reels.filter(r => r.status === 'geplant').length], ['archiv', 'Archiv', n.archiv], ['ideen', 'Ideen', n.ideen], ['zahlen', 'Zahlen', null]];
   const warn = state.stats && state.stats.ok === false && state.tab !== 'zahlen' ? `<div class="banner warn">Instagram-Zahlen konnten nicht geholt werden. Details unter «Zahlen».</div>` : '';
   app.innerHTML = `<nav>${tabs.map(([k, l, c]) => `<button data-tab="${k}" class="${state.tab === k ? 'on' : ''}">${l}${c != null ? `<span class="count">${c}</span>` : ''}</button>`).join('')}<span style="flex:1"></span><button class="btn small ghost" id="logout" title="Schlüssel von diesem Gerät entfernen">Abmelden</button></nav>
-    ${warn}${{ posten: viewPosten, archiv: viewArchiv, ideen: viewIdeen, zahlen: viewZahlen }[state.tab]()}`;
+    ${warn}${{ posten: viewPosten, geplant: viewGeplant, archiv: viewArchiv, ideen: viewIdeen, zahlen: viewZahlen }[state.tab]()}`;
   const s = $('#search'); if (s && state._focusSearch) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
 }
 
@@ -392,3 +398,4 @@ if (token()) loadAll().catch(err => { $('#app').innerHTML = `<div class="banner 
 </script>
 </body>
 </html>
+
