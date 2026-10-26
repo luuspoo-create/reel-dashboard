@@ -278,7 +278,7 @@ function viewPosten() {
 }
 function viewGeplant() {
   const list = state.reels.filter(r => r.status === 'geplant').sort((a,b) => (a.postiz?.scheduled_at || '').localeCompare(b.postiz?.scheduled_at || ''));
-  return `<div class="muted" style="margin-bottom:16px">Täglich ein Reel · Originalqualität · Termine in Schweizer Zeit. Terminänderungen und Absagen bitte in Postiz vornehmen; der Abgleich erfolgt alle 15 Minuten.</div>${list.length ? `<div class="grid">${list.map(reelCard).join('')}</div>` : '<div class="card empty"><div class="big">Noch keine Reels geplant.</div>Bestätigte Postiz-Termine erscheinen hier automatisch.</div>'}`;
+  return `<div class="muted" style="margin-bottom:16px">Täglich zwei Reels · 12:00 und 18:00 Uhr · Originalqualität · Termine in Schweizer Zeit. Terminänderungen und Absagen bitte in Postiz vornehmen; der Abgleich erfolgt alle 15 Minuten.</div>${list.length ? `<div class="grid">${list.map(reelCard).join('')}</div>` : '<div class="card empty"><div class="big">Noch keine Reels geplant.</div>Bestätigte Postiz-Termine erscheinen hier automatisch.</div>'}`;
 }
 function viewArchiv() {
   const q = state.search.toLowerCase();
